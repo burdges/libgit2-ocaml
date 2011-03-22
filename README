@@ -1,0 +1,8 @@
+
+This package provides ocaml bindings for libgit2.  Thus far, only the basic
+routineds for reading objects, references, etc. from the repository are bound.
+
+Usage :
+	make test
+	./test
+
