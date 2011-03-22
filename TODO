@@ -1,0 +1,20 @@
+
+Programming To Do :
+
+- Add index bindings.
+- Further homoginize the C stubs.
+- Tree entries should produces a blob directly, not just it's id.
+- Implement lazy lists for tree entries, commit parents, indexes, etc.
+- Is a union database object wise?  Any other stuff that should be more MLish?
+- Add bindings to creating and manipulating the varios data structures when
+  not managed by a repository.
+- Add write bindings for the objects managed in the repository, indices, etc.
+- Add revision walker bindings.
+- Figure out why libgit2 lacks merging.  :(
+
+Build To Do :
+
+- Fix the build for interactive mode.
+- Find out how one breaks up OCaml module into seperate files.  Worse case
+  senario, nuweb will even let you mix the C stubs and OCaml.
+
