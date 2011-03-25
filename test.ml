@@ -38,9 +38,11 @@ match Git.Reference.referent head with
  *)
 
 print_string "Testing Git.Commit.*\n" ;;
-let c = match Git.Reference.referent master with
-	  Git.Oid m -> Git.Commit.lookup r m
+let (master_oid,c) = match Git.Reference.referent master with
+	  Git.Oid m -> (m, Git.Commit.lookup r m)
 	| _ -> assert false ;;
+assert (master_oid = (Git.Commit.id c)) ;;
+
 let open Git.Commit in 
 	List.iter2 ( fun f x -> assert((f c) = x) ) 
 		[message; message_short ] 
