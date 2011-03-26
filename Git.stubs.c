@@ -35,6 +35,9 @@ define_unless_caml(invalid_argument);
 
 /* *** Convert git object ids to and from hex *** */
 
+// We handle these manually because the string lengths are fixed,
+// and a git_oid "string" may contain nulls.
+
 CAMLprim value
 ocaml_git_oid_from_hex( value hex ) {
    CAMLparam1(hex);
@@ -59,7 +62,7 @@ ocaml_git_oid_to_hex( value oid ) {
 }
 
 
-/* *** Time and signature operations *** */
+/* *** Time and signature conversions *** */
 
 git_time ocaml_time_to_git_time( value t ) {
 	git_time r;
@@ -127,7 +130,7 @@ int custom_ptr_compare( value a, value b ) {
 }
 
 #define define_git_ptr_type_manual(N) \
-static struct custom_operations git_##N##_manual_custom_ops = { \
+static struct custom_operations git_##N##_custom_ops = { \
     identifier:  "Git " #N " manual pointer handling", \
     finalize:    custom_finalize_default, \
     compare:     &custom_ptr_compare, \
@@ -136,13 +139,13 @@ static struct custom_operations git_##N##_manual_custom_ops = { \
     deserialize: custom_deserialize_default \
 };
 
-#define define_git_ptr_type_gced(N) \
+#define define_git_ptr_type_gced(N,FREE) \
 void custom_git_##N##_ptr_finalize (value v) { \
 	CAMLparam1(v); \
-	git_##N##_free( *(git_##N **)Data_custom_val(v) ); \
+	git_##N##_##FREE( *(git_##N **)Data_custom_val(v) ); \
 	CAMLreturn; \
 } \
-static struct custom_operations git_##N##_gced_custom_ops = { \
+static struct custom_operations git_##N##_custom_ops = { \
     identifier:  "Git " #N "GCed pointer handling", \
     finalize:    &custom_git_##N##_ptr_finalize, \
     compare:     &custom_ptr_compare, \
@@ -151,116 +154,79 @@ static struct custom_operations git_##N##_gced_custom_ops = { \
     deserialize: custom_deserialize_default \
 };
 
-#define caml_alloc_git_ptr(GITTYPE,MODE) \
-	caml_alloc_custom( & GITTYPE##_##MODE##_custom_ops, \
-		sizeof(GITTYPE *), 0, 1 )
-// The GA parameters used = 0 and max = 1 are unsuitble for large
-// alloctions like repositories, but that's a problem for another day.
+
+#define caml_alloc_git_ptr(GITTYPE) \
+	caml_alloc_custom( & GITTYPE##_custom_ops, \
+		sizeof(GITTYPE *), CAMLGC_used_##GITTYPE, CAMLGC_max_git )
+
+// We configure the ocaml garbage collector to close out git structs during
+// finilazation here.  Of course, the value used = 0 tells the garbage
+// colelctor that only the caml heap size matters.
+// see : http://caml.inria.fr/pub/docs/manual-ocaml/manual032.html
+
+#define CAMLGC_max_git			1000000
+#define CAMLGC_used_git_index		0
+#define CAMLGC_used_git_repository	0
+#define CAMLGC_used_git_odb		0
+#define CAMLGC_used_git_object		0
+#define CAMLGC_used_git_tree		0
+#define CAMLGC_used_git_commit		0
+#define CAMLGC_used_git_blob		0
+#define CAMLGC_used_git_reference	0
+
+
+#include "wrappers.h"
 
 
 /* *** Index operations *** */
 
-// define_git_ptr_type_manual(index);
-// define_git_ptr_type_gced(index);
+define_git_ptr_type_manual(index);
+
 
 
 /* *** Repository and object database operations *** */
 
-; // Needed for names by caml_alloc_git_ptr's naming convention
-typedef git_odb git_database;
-define_git_ptr_type_manual(database);  
+define_git_ptr_type_manual(odb);  
 define_git_ptr_type_manual(repository);
-// We're giving ocamls garbage collector power to free the whole repository
-// because we assume the outer loop is ocaml.  If the outter loop were C
-// then you'd take another appraoch.
 
-CAMLprim value
-ocaml_git_odb_exists( value db, value id ) {
-   CAMLparam2(db,id);
-   CAMLreturn( Val_bool(git_odb_exists(
-        *(git_odb **)Data_custom_val(db),
-        (git_oid *)String_val(id)
-   )) );
-}
+wrap_retval_ptr1_val1(git_odb_exists,Val_bool,git_odb,
+	(git_oid *)String_val);
 
-CAMLprim value
-ocaml_git_repository_database( value repo ) {
-   CAMLparam1(repo);
-   CAMLlocal1(db);
-   db = caml_alloc_git_ptr(git_database,manual);
-   *(git_odb **)Data_custom_val(db) =
-        git_repository_database( *(git_repository **)Data_custom_val(repo) );
-   CAMLreturn(db);
-}
+wrap_retptr_ptr1(git_repository_database,git_odb,
+	"Git.Repository.database",
+	git_repository);
 
-CAMLprim value
-ocaml_git_repository_init( value bare, value dir ) {
-   CAMLparam2(bare,dir);
-   CAMLlocal1(repo);
-   repo = caml_alloc_git_ptr(git_repository,manual);
-   unless_caml_failwith(
-      git_repository_init( (git_repository **)Data_custom_val(repo),
-            String_val(dir), Bool_val(bare) ),
-      "Git.Repository._init");
-   CAMLreturn(repo);
-}
+wrap_setptr_val2(git_repository_init,git_repository,
+	"Git.Repository._init",failwith,
+	String_val,Bool_val);
 
-CAMLprim value
-ocaml_git_repository_open1( value dir ) {
-   CAMLparam1(dir);
-   CAMLlocal1(repo);
-   repo = caml_alloc_git_ptr(git_repository,manual);
-   unless_caml_failwith(
-      git_repository_open( (git_repository **)Data_custom_val(repo),
-            String_val(dir) ),
-      "Git.Repository.open1");
-   CAMLreturn(repo);
-}
+#define git_repository_open1 git_repository_open
+wrap_setptr_val1(git_repository_open1,git_repository,
+	"Git.Repository.open1",failwith,
+	String_val);
 
-CAMLprim value
-ocaml_git_repository_free( value repo ) {
-   CAMLparam1(repo);
-   git_repository_free( *(git_repository **)Data_custom_val(repo) );
-   CAMLreturn(Val_unit);
-}  // Warning : git_repository_close exists only as an extern in repository.h
+wrap_setptr_val4(git_repository_open2,git_repository,
+	"Git.Repository.open2",failwith,
+	String_val,String_val,String_val,String_val);
 
 
-/* indexs are yet currently supported */
-// CAMLprim value
-// ocaml_git_repository_index( value repo ) {
-// 
-// }
+wrap_retunit_ptr1(git_repository_free,git_repository);
+// Warning : git_repository_close exists only as an extern in repository.h
+
+wrap_setptr_ptr1(git_repository_index,git_index,
+	"Git.Repository.index",invalid_argument,
+ 	git_repository);
 
 
 /* *** Object operations *** */
 
 define_git_ptr_type_manual(object);
 
-// I'm afraid these would require either including libgit2's src/repository.h
-// or casting the (git_object *) to an (git_oid *), suggesting libgit2 does
-// not approve.
-//
-// CAMLprim value
-// ocaml_git_oid_from_object( value o ) {
-//   CAMLparam1(o);
-//   CAMLlocal1(id);
-//   (const char *) String_val(o);
-//   id = caml_alloc_string( GIT_OID_RAWSZ );
-//   unless_caml_invalid_argument(
-//      git_rawobj_hash( (git_oid *)String_val(id),
-//            &((git_object *)Data_custom_val(o)->source.raw) ),
-//     "Git.Object.oid");
-// CAMLreturn(id);
-// }
-//
-// CAMLprim value
-// ocaml_git_otype_from_object( value o ) { ... }
-
 CAMLprim value
 _ocaml_git_object_lookup( value repo, value id, git_otype otype ) {
    CAMLparam2(repo,id);
    CAMLlocal1(obj);
-   obj = caml_alloc_git_ptr(git_object,manual);
+   obj = caml_alloc_git_ptr(git_object);
    unless_caml_invalid_argument(
       git_object_lookup( (git_object **)Data_custom_val(obj),
             *(git_repository **)Data_custom_val(repo),
@@ -289,20 +255,29 @@ CAMLprim value ocaml_git_##N(value v) { \
    )) ); \
 }
 
-define_ocaml_git_simple_fetch_from_git_ptr(object_id,git_object,caml_copy_git_oid);  // ocaml_git_object_id
-// we may safely cast a (git_[object_type] *) to (git_object *)
+wrap_retval_ptr1(git_object_id,caml_copy_git_oid,
+	git_object);
+// we may safely cast a (git_[object_type] *) to (git_object *), btw.
 
-// git_object_write
+wrap_retval_ptr1(git_object_type,Val_int,
+	git_object);
+
+wrap_retunit_exn_ptr1(git_object_write,
+	"Git.Object.write",failwith,
+	git_object);
+
+// git_object_new
 
 
 /* *** Tree operations *** */
 
-define_git_ptr_type_manual(tree);  // simple duplication doesn't work?
+#define git_tree_custom_ops git_object_custom_ops
 
 CAMLprim value ocaml_git_tree_lookup( value repo, value id )
    { return _ocaml_git_object_lookup(repo,id,GIT_OBJ_TREE); }
 
-define_ocaml_git_simple_fetch_from_git_ptr(tree_entrycount,git_tree,Val_int);
+wrap_retval_ptr1(git_tree_entrycount,Val_int,
+	git_tree);
 
 CAMLprim value
 git_tree_entry_to_ocaml_tree_entry(git_tree_entry *te) {
@@ -319,15 +294,15 @@ git_tree_entry_to_ocaml_tree_entry(git_tree_entry *te) {
    CAMLreturn(tuple);
 }  // I considered returning an option here, but matching the empty string is just as easy
 
-#define define_ocaml_git_tree_entry(N,CONVERSION) \
+#define wrap_git_tree_entry(N,CONVERSION) \
 CAMLprim value ocaml_git_tree_entry_##N( value tree, value v ) { \
 	CAMLparam2(tree,v); \
 	git_tree_entry *te = git_tree_entry_##N ( *(git_tree **)Data_custom_val(tree), CONVERSION(v) ); \
 	CAMLreturn(git_tree_entry_to_ocaml_tree_entry(te)); \
 }
 
-define_ocaml_git_tree_entry(byname,String_val);  // ocaml_git_tree_entry_byname
-define_ocaml_git_tree_entry(byindex,Int_val);    // ocaml_git_tree_entry_byindex
+wrap_git_tree_entry(byname,String_val);  // ocaml_git_tree_entry_byname
+wrap_git_tree_entry(byindex,Int_val);    // ocaml_git_tree_entry_byindex
 
 
 /* *** Commit operations *** */
@@ -346,28 +321,17 @@ CAMLprim value ocaml_git_commit_time(value commit) {
    CAMLreturn( git_time_to_ocaml_time(time) );
 }  // should submit a patch to libgit2 to use a git_time
 
-#define define_ocaml_git_commit_fetch(NN,C) \
-define_ocaml_git_simple_fetch_from_git_ptr(commit_##NN,git_commit,C);
+#define wrap_retval_commit(NN,C)  wrap_retval_ptr1(NN,C,git_commit)
+wrap_retval_commit(git_commit_message_short,caml_copy_string);
+wrap_retval_commit(git_commit_message,caml_copy_string);
+wrap_retval_commit(git_commit_committer,git_signture_to_ocaml_signture);
+wrap_retval_commit(git_commit_author,git_signture_to_ocaml_signture);
 
-define_ocaml_git_commit_fetch(message_short,caml_copy_string);		  // ocaml_git_commit_message_short
-define_ocaml_git_commit_fetch(message,caml_copy_string);		  // ocaml_git_commit_message
-define_ocaml_git_commit_fetch(committer,git_signture_to_ocaml_signture);  // ocaml_git_commit_committer
-define_ocaml_git_commit_fetch(author,git_signture_to_ocaml_signture);	  // ocaml_git_commit_author
-
-#define define_ocaml_git_simple_fill_ptr_from_git_ptr(N,NEWTYPE,MODE,OLDTYPE,ERROR) \
-CAMLprim value ocaml_git_##N(value v) { \
-	CAMLparam1(v); \
-	CAMLlocal1(r); \
-	r = caml_alloc_git_ptr(NEWTYPE,MODE); \
-	unless_caml_invalid_argument( \
-		git_##N( (NEWTYPE **)Data_custom_val(r), \
-			*(OLDTYPE **)Data_custom_val(v) ), \
-	ERROR ); \
-	CAMLreturn(r); \
-}
-
-define_ocaml_git_simple_fill_ptr_from_git_ptr(commit_tree,git_tree,manual,git_commit,"Git.Commit.tree");
+wrap_setptr_ptr1(git_commit_tree,git_tree,
+	"Git.Commit.tree",invalid_argument,
+	git_commit);
 // ocaml_git_commit_tree calls git_tree_lookup
+
 
 // CAMLprim value
 // ocaml_git_commit_parents(value commit) {
@@ -382,10 +346,9 @@ define_ocaml_git_simple_fill_ptr_from_git_ptr(commit_tree,git_tree,manual,git_co
 CAMLprim value ocaml_git_blob_lookup( value repo, value id )
 	{ return _ocaml_git_object_lookup(repo,id,GIT_OBJ_BLOB); }
 
-#define define_ocaml_git_blob_fetch(NN,C) \
-define_ocaml_git_simple_fetch_from_git_ptr(blob_##NN,git_blob,C);
+#define wrap_retval_blob(NN,C)  wrap_retval_ptr1(NN,C,git_blob)
 
-define_ocaml_git_blob_fetch(rawsize,Val_int); // ocaml_git_blob_size
+wrap_retval_blob(git_blob_rawsize,Val_int);
 
 CAMLprim value ocaml_git_blob_rawcontent(value blob) {
 	CAMLparam1(blob);
@@ -405,16 +368,16 @@ CAMLprim value ocaml_git_blob_rawcontent(value blob) {
 CAMLprim value ocaml_git_tag_lookup( value repo, value id )
 	{ return _ocaml_git_object_lookup(repo,id,GIT_OBJ_TAG); }
 
-#define define_ocaml_git_tag_fetch(NN,C) \
-define_ocaml_git_simple_fetch_from_git_ptr(tag_##NN,git_tag,C);
+#define wrap_retval_tag(NN,C)  wrap_retval_ptr1(NN,C,git_tag)
+wrap_retval_tag(git_tag_name,caml_copy_string);
+wrap_retval_tag(git_tag_type,Val_int);
+wrap_retval_tag(git_tag_target_oid,caml_copy_git_oid);
+wrap_retval_tag(git_tag_message,caml_copy_string);
+wrap_retval_tag(git_tag_tagger,git_signture_to_ocaml_signture);
 
-define_ocaml_git_tag_fetch(name,caml_copy_string);
-define_ocaml_git_tag_fetch(type,Val_int);
-define_ocaml_git_tag_fetch(target_oid,caml_copy_git_oid);
-define_ocaml_git_tag_fetch(message,caml_copy_string);
-define_ocaml_git_tag_fetch(tagger,git_signture_to_ocaml_signture);
-
-define_ocaml_git_simple_fill_ptr_from_git_ptr(tag_target,git_object,manual,git_tag,"Git.Tag.target");
+wrap_setptr_ptr1(git_tag_target,git_object,
+	"Git.Tag.target",invalid_argument,
+	git_tag);
 // ocaml_git_tag_target calls git_object_lookup
 
 
@@ -422,30 +385,37 @@ define_ocaml_git_simple_fill_ptr_from_git_ptr(tag_target,git_object,manual,git_t
 
 define_git_ptr_type_manual(reference);
 
-CAMLprim value
-ocaml_git_reference_lookup( value repo, value name ) {
-   CAMLparam2(repo,name);
-   CAMLlocal1(ref);
-   ref = caml_alloc_git_ptr(git_reference,manual);
-   unless_caml_invalid_argument(
-      git_reference_lookup( (git_reference **)Data_custom_val(ref),
-            *(git_repository **)Data_custom_val(repo),
-            (char *)String_val(name) ),
-      "Git.Reference.lookup");
-   CAMLreturn(ref);
-}
+wrap_setptr_ptr1_val1(git_reference_lookup,git_reference,
+	"Git.Reference.lookup",invalid_argument,
+	git_repository, (char *)String_val);
 
-#define define_ocaml_git_reference_fetch(NN,C) \
-define_ocaml_git_simple_fetch_from_git_ptr(reference_##NN,git_reference,C);
+#define wrap_retval_reference(NN,C)  wrap_retval_ptr1(NN,C,git_reference)
+wrap_retval_reference(git_reference_name,caml_copy_string);
 
-define_ocaml_git_reference_fetch(name,caml_copy_string); // ocaml_git_reference_name
-define_ocaml_git_simple_fill_ptr_from_git_ptr(reference_resolve,git_reference,manual,git_reference,"Git.Reference.resolve"); // ocaml_git_reference_resolve
+wrap_setptr_ptr1(git_reference_resolve,git_reference,
+	"Git.Reference.resolve",invalid_argument,
+	git_reference);
 
 // We create the value of type referent_t in ocaml instead of writing a
 // ocaml_git_reference_referent function in C.
-define_ocaml_git_reference_fetch(type,Val_int);  // ocaml_git_reference_type
-define_ocaml_git_reference_fetch(oid,caml_copy_git_oid);   // ocaml_git_reference_oid
-define_ocaml_git_reference_fetch(target,caml_copy_string); // ocaml_git_reference_target
+wrap_retval_reference(git_reference_type,Val_int);
+wrap_retval_reference(git_reference_oid,caml_copy_git_oid);
+wrap_retval_reference(git_reference_target,caml_copy_string);
+
+CAMLprim value ocaml_git_reference_listall( value repo, value flags ) {
+	CAMLparam2(repo,flags);
+	CAMLlocal1(r);
+	git_strarray a; int i;
+	unless_caml_invalid_argument(
+		git_reference_listall( &a, *(git_repository **)Data_custom_val(repo), Int_val(flags) ),
+	"Git.Reference.listall" );
+	r = caml_alloc(a.count, 0);
+	for (i=0; i < a.count; i++) {
+		Store_field(r, i, caml_copy_string(a.strings[i]) );
+	}
+	git_strarray_free(&a);
+	CAMLreturn(r);
+}
 
 
 /* *** Revwalk operations *** */

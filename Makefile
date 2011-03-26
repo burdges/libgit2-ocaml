@@ -1,4 +1,7 @@
-Git.stubs.o: Git.stubs.c
+wrappers.h: wrappers.pl
+	perl wrappers.pl >wrappers.h
+
+Git.stubs.o: Git.stubs.c wrappers.h
 	ocamlc -c $<
 
 dll_git2_stubs.so: Git.stubs.o

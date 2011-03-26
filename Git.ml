@@ -75,9 +75,9 @@ end ;;
 module Repository : REPOSITORY = struct 
   type t 
   external odb : t -> Odb.t = "ocaml_git_repository_database" 
-  external _init : bool -> string -> t = "ocaml_git_repository_init" 
-  let init = _init false 
-  let init_bare = _init true 
+  external _init : string -> bool -> t = "ocaml_git_repository_init" 
+  let init dir = _init dir false 
+  let init_bare dir = _init dir true 
   external open1 : string -> t = "ocaml_git_repository_open1" 
   external free : t -> unit = "ocaml_git_repository_free" 
   (* external index : t -> Index.t = "ocaml_git_repository_index" *)
@@ -238,14 +238,17 @@ module type REFERENCE = sig
   val name : t -> string
   val resolve : t -> t
   val referent : t -> referent_t
+  val listall : Repository.t -> int -> string array
 end ;;
 
 module Reference : REFERENCE = struct
   type t
   external lookup : Repository.t -> string -> t
        = "ocaml_git_reference_lookup" 
-  external name : t -> string     = "ocaml_git_reference_name" 
-  external resolve : t -> t       = "ocaml_git_reference_resolve" 
+  external name : t -> string	= "ocaml_git_reference_name" 
+  external resolve : t -> t	= "ocaml_git_reference_resolve" 
+  external listall : Repository.t -> int -> string array
+				= "ocaml_git_reference_listall" 
 
   external _rtype : t -> int      = "ocaml_git_reference_type" 
   external _oid : t -> Oid.t      = "ocaml_git_reference_oid" 
