@@ -194,10 +194,12 @@ end ;;
 module type TREE = sig
   include OBJECT
   val lookup : Repository.t -> Oid.t -> t
+  val create : Repository.t -> t
   val entrycount : t -> int
-  val entry_byindex : t -> int -> entry
-  val entry_byname : t -> string -> entry
-  val entries : t -> entry array
+  val entry_byindex : t -> int -> TreeEntry.t
+  val entry_byname : t -> string -> TreeEntry.t
+  val entries : t -> TreeEntry.t array
+  val add_entry : t -> Oid.t -> string -> int -> TreeEntry.t
   val remove_entry_byindex : t -> int -> unit
   val remove_entry_byname : t -> string -> unit
   val clear_entries : t -> unit
@@ -207,7 +209,7 @@ module Tree : TREE = struct
   include Object
   external lookup : Repository.t -> Oid.t -> t
 	= "ocaml_git_tree_lookup"
-  external new : Repository.t -> t
+  external create : Repository.t -> t
 	= "ocaml_git_tree_new"
 
   external entrycount : t -> int

@@ -60,7 +60,7 @@ print_string " \n" ;;
 let t = Git.Commit.tree c ;;
 print_string "Testing Git.Tree.*\n" ;;
 assert ( (Git.Tree.entrycount t) = (List.length playthings) ) ;;
-let (_,todo_oid) = Git.Tree.entry_byname t "TODO" ;;
+let todo_oid = Git.TreeEntry.id (Git.Tree.entry_byname t "TODO") ;;
 
 print_string ("Testing Git.Blob.* :\n") ;;
 let b = Git.Blob.lookup r todo_oid ;;
@@ -68,7 +68,9 @@ print_string (Git.Blob.content b) ;;
 
 let rec range i j = if i > j then [] else i :: (range (i+1) j) ;;
 List.iter (
-	fun (fn,oid) -> let {Unix.st_size=s} = Unix.stat fn in
+	fun e -> let fn = Git.TreeEntry.name e in
+		let oid = Git.TreeEntry.id e in
+		let {Unix.st_size=s} = Unix.stat fn in
 			assert ( s = (Git.Blob.size (Git.Blob.lookup r oid)) )
 	) ( List.map (Git.Tree.entry_byindex t) (range 0 ((Git.Tree.entrycount t) - 1)) )
 

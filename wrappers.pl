@@ -45,7 +45,8 @@ $lines
 __EoC__
 }
 
-wrap_retunit(1,0); # only close and free?
+wrap_retunit(1,0);
+wrap_retunit(1,1);
 
 sub wrap_retunit_exn {
 	set_wrap_args(@_);
@@ -53,10 +54,10 @@ sub wrap_retunit_exn {
 #define wrap_retunit_exn$argdsc(FUNCTION,ERROR,EXN,$def_args)
 CAMLprim value ocaml_##FUNCTION($fun_args) {
 	CAMLparam$paramc($params);
-	unless_caml_##EXN(
+	pass_git_exceptions(
 	FUNCTION( 
 $lines
-	), ERROR ); 
+	), ERROR, EXN ); 
 	CAMLreturn(Val_unit);
 }
 __EoC__
@@ -93,7 +94,8 @@ CAMLprim value ocaml_##FUNCTION($fun_args) {
 	FUNCTION( 
 $lines
 	);
-	unless_caml_invalid_argument(*(NEWTYPE **)Data_custom_val(r) != NULL, ERROR);
+	if( *(NEWTYPE **)Data_custom_val(r) == NULL )
+		caml_invalid_argument( #ERROR " : " #FUNCTION " returned null." );
 	CAMLreturn(r);
 }
 __EoC__
@@ -111,14 +113,14 @@ CAMLprim value ocaml_##FUNCTION($fun_args) {
 	CAMLparam$paramc($params);
 	CAMLlocal1(r);
 	r = caml_alloc_git_ptr(NEWTYPE);
-	unless_caml_##EXN(
+	pass_git_exceptions(
 	FUNCTION( (NEWTYPE **)Data_custom_val(r),
 $lines
-	), ERROR );
+	), ERROR, EXN );
 	CAMLreturn(r);
 }
 __EoC__
 } # We support both invalid_argument and failwith
 
-map { wrap_setptr(@$_); } (@valargs, [0,3], [0,4], @ptrargs);
+map { wrap_setptr(@$_); } (@valargs, [0,3], [0,4], @ptrargs, [1,3]);
 
