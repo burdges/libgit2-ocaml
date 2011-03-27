@@ -2,7 +2,8 @@
 # We build a colelction of cpp function factories here that'll help reduce
 # boilerplate and pointer mistakes when wrapping libgit2 functions. 
 
-@baseargs =  ( [0,1], [0,2], [0,3], [1,0], [1,1], [1,2] ) ;
+@valargs = ( [0,1], [0,2], [0,3] );
+@ptrargs =  ( [1,0], [1,1], [1,2] );
 
 # Escape all lines in a #define after removing // comments
 sub slashn {
@@ -61,7 +62,7 @@ $lines
 __EoC__
 }
 
-wrap_retunit_exn(1,0); # only writing?
+map { wrap_retunit_exn(@$_); } @ptrargs;
 
 
 sub wrap_retval {
@@ -76,6 +77,9 @@ $lines
 }
 __EoC__
 }
+
+map { wrap_retval(@$_); } (@valargs, @ptrargs);
+
 
 sub wrap_retptr {
 	set_wrap_args(@_);
@@ -94,8 +98,9 @@ $lines
 }
 __EoC__
 }
-# We shouldn't actually need the error checking in wrap_retptr, given the
-# specific routines it wraps, but who knows.  Ergo, all are invalid_argument.
+# Afaik, all are invalid_argument.
+
+map { wrap_retptr(@$_); } (@valargs, @ptrargs);
 
 
 sub wrap_setptr {
@@ -115,15 +120,5 @@ $lines
 __EoC__
 } # We support both invalid_argument and failwith
 
-
-
-
-
-map { wrap_retval(@$_); } @baseargs;
-
-map { wrap_retptr(@$_); } @baseargs;
-
-map { wrap_setptr(@$_); } @baseargs;
-wrap_setptr(0,3);
-wrap_setptr(0,4);
+map { wrap_setptr(@$_); } (@valargs, [0,3], [0,4], @ptrargs);
 

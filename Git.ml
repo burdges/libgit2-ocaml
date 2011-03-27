@@ -26,19 +26,56 @@ end ;;
 
 (* *** Indexes *** *)
 
-(*
- * The index is the staging area between the repository and the database.
- * Ergo, any porcelain layer write functionality will need it.
- * We may define it here because the only git type needed will be git_oid.
- *)
+(* The index is the staging area between the repository and the database. *)
+
 
 module type INDEX = sig
   type t
+  type entry = {
+	ctime : float;		mtime : float;
+	dev : int;		ino : int;		mode : int;
+	uid : int;		gid : int;		file_size : int;
+	oid : Oid.t;
+	flags : int;	flags_extended : int;
+	path : string }
+
+  val open_bare : string -> t
+  val clear : t -> unit
+  val free : t -> unit
+  val read : t -> unit
+  val write : t -> unit
+  val find : t -> int
+  val add : t -> string -> int -> unit
+  val remove : t -> int -> unit
+  val insert : t -> entry -> unit
+  val get : t -> int -> entry
+  val entrycount : t -> int
 end ;;
 
 module Index : INDEX = struct
   type t
+  type entry = {
+	ctime : float;		mtime : float;
+	dev : int;		ino : int;		mode : int;
+	uid : int;		gid : int;		file_size : int;
+	oid : Oid.t;
+	flags : int;	flags_extended : int;
+	path : string }
+
+  external open_bare : string -> t	= "ocaml_git_index_open_bare"
+  external clear : t -> unit		= "ocaml_git_index_clear"
+  external free : t -> unit		= "ocaml_git_index_free"
+  external read : t -> unit		= "ocaml_git_index_read"
+  external write : t -> unit		= "ocaml_git_index_write"
+
+  external find : t -> int		= "ocaml_git_index_find"
+  external add : t -> string -> int -> unit = "ocaml_git_index_add"
+  external remove : t -> int -> unit	= "ocaml_git_index_remove"
+  external insert : t -> entry -> unit	= "ocaml_git_index_insert"
+  external get : t -> int -> entry	= "ocaml_git_index_get"
+  external entrycount : t -> int	= "ocaml_git_index_entrycount"
 end ;;
+  (* Note that git_repository_index is identical to git_index_open_inrepo *)
 
 
 (* *** Object Databases and Repositories *** *)
@@ -46,9 +83,8 @@ end ;;
 (* 
  * We shall maintain the distinction between the repository and the database
  * for forwards compatibility.  For now though, we suppress all lower level
- * commands for opening repositories with dissociated paths, databases not
- * contained in a repository, custom backends, and the raw object methods
- * needed for custom backends.
+ * commands aimed at custom backends, including databases not contained in a
+ * repository and all git_rawobj methods.
  *)
 
 module type ODB = sig
@@ -68,20 +104,24 @@ module type REPOSITORY = sig
   val init : string -> t
   val init_bare : string -> t
   val open1 : string -> t
+  val open2 : string -> string -> string -> string -> t
   val free : t -> unit
-  (* val index : t -> Index.t *)
+  val index : t -> Index.t
 end ;;
 
 module Repository : REPOSITORY = struct 
   type t 
   external odb : t -> Odb.t = "ocaml_git_repository_database" 
-  external _init : string -> bool -> t = "ocaml_git_repository_init" 
+  external _init : string -> bool -> t	= "ocaml_git_repository_init" 
   let init dir = _init dir false 
   let init_bare dir = _init dir true 
-  external open1 : string -> t = "ocaml_git_repository_open1" 
-  external free : t -> unit = "ocaml_git_repository_free" 
-  (* external index : t -> Index.t = "ocaml_git_repository_index" *)
+  external open1 : string -> t		= "ocaml_git_repository_open1" 
+  external open2 : string -> string -> string -> string -> t
+	= "ocaml_git_repository_open2"
+  external free : t -> unit		= "ocaml_git_repository_free" 
+  external index : t -> Index.t		= "ocaml_git_repository_index"
 end ;;
+
 
 
 (* *** Abstract Database Objects *** *)
@@ -125,31 +165,73 @@ end ;;
 
 (* Trees store directory hierarchies for commit objects *)
 
+module type TREEENTRY = sig
+  type t
+  val attributes : t -> int
+  val name : t -> string
+  val id : t -> Oid.t
+  val set_attributes : t -> int -> unit
+  val set_name : t -> string -> unit
+  val set_id : t -> Oid.t -> unit
+end ;;
+
+module TreeEntry : TREEENTRY = struct
+  type t
+  external attributes : t -> int
+	= "ocaml_git_tree_entry_attributes"
+  external name : t -> string
+	= "ocaml_git_tree_entry_name"
+  external id : t -> Oid.t
+	= "ocaml_git_tree_entry_id"
+  external set_attributes : t -> int -> unit
+	= "ocaml_git_tree_entry_set_attributes"
+  external set_name : t -> string -> unit
+	= "ocaml_git_tree_entry_set_name"
+  external set_id : t -> Oid.t -> unit
+	= "ocaml_git_tree_entry_set_id"
+end ;;
+
 module type TREE = sig
   include OBJECT
-  type entry = string * Oid.t
   val lookup : Repository.t -> Oid.t -> t
   val entrycount : t -> int
   val entry_byindex : t -> int -> entry
   val entry_byname : t -> string -> entry
+  val entries : t -> entry array
+  val remove_entry_byindex : t -> int -> unit
+  val remove_entry_byname : t -> string -> unit
+  val clear_entries : t -> unit
 end ;;
-(* We must hide these sloppy entry access methods in favor of some proper  *
- * functional interface, presumably a lazy list using the Lazy module, but *
- * this requires further though on my part, and may depend upon add_entry, *
- * indexes, etc.                                                           *)
 
 module Tree : TREE = struct
   include Object
-  type entry = string * Oid.t
   external lookup : Repository.t -> Oid.t -> t
-       = "ocaml_git_tree_lookup" 
+	= "ocaml_git_tree_lookup"
+  external new : Repository.t -> t
+	= "ocaml_git_tree_new"
+
   external entrycount : t -> int
-       = "ocaml_git_tree_entrycount" 
-  external entry_byindex : t -> int -> entry
-       = "ocaml_git_tree_entry_byindex" 
-  external entry_byname : t -> string -> entry
-       = "ocaml_git_tree_entry_byname" 
+	= "ocaml_git_tree_entrycount" 
+  external entry_byindex : t -> int -> TreeEntry.t
+	= "ocaml_git_tree_entry_byindex"
+  external entry_byname : t -> string -> TreeEntry.t
+	= "ocaml_git_tree_entry_byname" 
+  let entries tree = Array.init (entrycount tree) (fun i -> entry_byindex tree i)
+
+  external add_entry : t -> Oid.t -> string -> int -> TreeEntry.t
+	= "ocaml_git_tree_add_entry"
+  external remove_entry_byindex : t -> int -> unit
+	= "ocaml_git_tree_remove_entry_byindex"
+  external remove_entry_byname : t -> string -> unit
+	= "ocaml_git_tree_remove_entry_byname" 
+
+  external clear_entries : t -> unit
+	= "ocaml_git_tree_clear_entries" 
 end ;;
+  (* git_tree_entry_2object appears after all object definitions *)
+
+(* The three functions git_tree_entry_set_id, git_tree_entry_set_name, and *
+ * git_tree_entry_set_attributes suggest we must track tree entry pointers *)
 
 
 (* *** Commit Database Objects *** *)
@@ -265,6 +347,7 @@ end ;;
 
 (*
 
+
 type object_types = Ext1
      | Commit of Commit.t
      | Tree of Tree.t
@@ -276,6 +359,9 @@ type object_types = Ext1
 
 val tag_target_obj : Tag.t -> object_types
 val reference_referent_obj : Reference.t -> object_types
+
+let tree_entry_2object entry
+
 
 *)
 

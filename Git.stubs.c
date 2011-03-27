@@ -182,15 +182,92 @@ static struct custom_operations git_##N##_custom_ops = { \
 
 define_git_ptr_type_manual(index);
 
+wrap_setptr_val1(git_index_open_bare,git_index,
+	"Git.Index.open_bare",failwith,
+	String_val);
+
+wrap_retunit_ptr1(git_index_clear,
+	git_index);
+wrap_retunit_ptr1(git_index_free,
+	git_index);
+wrap_retunit_exn_ptr1(git_index_read,
+	"Git.Index.read",invalid_argument,
+	git_index);
+wrap_retunit_exn_ptr1(git_index_write,
+	"Git.Index.write",invalid_argument,
+	git_index);
+wrap_retval_ptr1_val1(git_index_find,Val_int, // -1 should throw an exception
+	git_index,String_val);
+wrap_retunit_exn_ptr1_val2(git_index_add,
+	"Git.Index.add",invalid_argument,
+	git_index,String_val,Int_val);
+wrap_retunit_exn_ptr1_val1(git_index_remove,
+	"Git.Index.remove",invalid_argument,
+	git_index,Int_val);
+wrap_retval_ptr1(git_index_entrycount,Val_int,
+	git_index);
+
+// We're ignoring the nanoseconds since libgit2 doesn't handle them either.
+
+CAMLextern value
+ocaml_git_index_insert( value index, value v ) {
+	CAMLparam2(index,v);
+	git_index_entry entry;
+	entry.ctime.seconds = (git_time_t)Double_val(Field(v,0));
+	entry.mtime.seconds = (git_time_t)Double_val(Field(v,1));
+	entry.dev = Int_val(Field(v,2));
+	entry.ino = Int_val(Field(v,3));
+	entry.mode = Int_val(Field(v,4));
+	entry.uid = Int_val(Field(v,5));
+	entry.gid = Int_val(Field(v,6));
+	entry.file_size = Int_val(Field(v,7));
+	memcpy( &entry.oid, String_val(Field(v,8)), GIT_OID_RAWSZ );
+	entry.flags = Int_val(Field(v,9));
+	entry.flags_extended = Int_val(Field(v,10));
+	entry.path = String_val(Field(v,11));
+	unless_caml_invalid_argument(
+		git_index_insert( *(git_index **)Data_custom_val(index), &entry ),
+	"Git.Index.insert");
+	CAMLreturn(Val_unit);
+}
+
+CAMLextern value
+git_index_entry_to_ocaml_index_entry(git_index_entry *entry) {
+	CAMLparam0();
+	CAMLlocal2(r,oid);
+	oid = caml_alloc_string( GIT_OID_RAWSZ );
+	memcpy( String_val(oid), &entry->oid, GIT_OID_RAWSZ );
+	r = caml_alloc(12,0);
+	Store_field(r, 0, caml_copy_double((double)entry->ctime.seconds));
+	Store_field(r, 1, caml_copy_double((double)entry->mtime.seconds));
+	Store_field(r, 2, Val_int(entry->dev));
+	Store_field(r, 3, Val_int(entry->ino));
+	Store_field(r, 4, Val_int(entry->mode));
+	Store_field(r, 5, Val_int(entry->uid));
+	Store_field(r, 6, Val_int(entry->gid));
+	Store_field(r, 7, Val_int(entry->file_size));
+	Store_field(r, 8, oid);
+	Store_field(r, 9, Val_int(entry->flags));
+	Store_field(r, 10, Val_int(entry->flags_extended));
+	Store_field(r, 11, caml_copy_string(entry->path));
+	CAMLreturn(r);
+}
+
+wrap_retval_ptr1_val1(git_index_get,git_index_entry_to_ocaml_index_entry,
+	git_index, Int_val);
 
 
 /* *** Repository and object database operations *** */
 
 define_git_ptr_type_manual(odb);  
-define_git_ptr_type_manual(repository);
+
+wrap_retunit_ptr1(git_odb_close,git_odb);
 
 wrap_retval_ptr1_val1(git_odb_exists,Val_bool,git_odb,
 	(git_oid *)String_val);
+
+
+define_git_ptr_type_manual(repository);
 
 wrap_retptr_ptr1(git_repository_database,git_odb,
 	"Git.Repository.database",
@@ -273,36 +350,71 @@ wrap_retunit_exn_ptr1(git_object_write,
 
 #define git_tree_custom_ops git_object_custom_ops
 
+define_git_ptr_type_manual(tree_entry);
+
+wrap_retval_ptr1(git_tree_entry_attributes,Val_int,  git_tree_entry);
+wrap_retval_ptr1(git_tree_entry_name,caml_copy_string,  git_tree_entry);
+wrap_retval_ptr1(git_tree_entry_id,caml_copy_git_oid,  git_tree_entry);
+wrap_retunit_ptr1_val1(git_tree_entry_set_attributes,
+	git_tree_entry, Int_val);
+wrap_retunit_ptr1_val1(git_tree_entry_set_name,
+	git_tree_entry, String_val);
+wrap_retunit_ptr1_val1(git_tree_entry_set_id,
+	git_tree_entry, String_val);
+
+
 CAMLprim value ocaml_git_tree_lookup( value repo, value id )
    { return _ocaml_git_object_lookup(repo,id,GIT_OBJ_TREE); }
 
-wrap_retval_ptr1(git_tree_entrycount,Val_int,
-	git_tree);
+wrap_setptr_ptr1(git_tree_new,git_tree,
+	"Git.Tree.new",invalid_argument,
+ 	git_repository);
+
+wrap_retval_ptr1(git_tree_entrycount,Val_int,  git_tree);
+
+wrap_setptr_ptr1_val3(git_tree_add_entry,git_tree_entry,
+	"Git.Tree.add_entry",invalid_argument,
+ 	git_tree, String_val,String_val,Int_val);
 
 CAMLprim value
 git_tree_entry_to_ocaml_tree_entry(git_tree_entry *te) {
-   CAMLparam0();
-   CAMLlocal1(tuple);
-   tuple = caml_alloc_tuple(2);
-   if (te) {
-      Store_field( tuple, 0, caml_copy_string(git_tree_entry_name(te)) );
-      Store_field( tuple, 1, caml_copy_git_oid(git_tree_entry_id(te)) );
-   } else {
-      Store_field( tuple, 0, caml_copy_string("") );
-      Store_field( tuple, 1, caml_copy_string("") );      
-   }
-   CAMLreturn(tuple);
+	CAMLparam0();
+	CAMLlocal1(tuple);
+	tuple = caml_alloc_tuple(3);
+	if (te) {
+		Store_field( tuple, 0, caml_copy_string(git_tree_entry_name(te)) );
+		Store_field( tuple, 1, Val_int(git_tree_entry_attributes(te)) );
+		Store_field( tuple, 1, caml_copy_git_oid(git_tree_entry_id(te)) );
+	} else {
+		Store_field( tuple, 0, caml_copy_string("") );
+		Store_field( tuple, 1, Val_int(0) );      
+		Store_field( tuple, 2, caml_copy_string("") );      
+	}
+	CAMLreturn(tuple);
 }  // I considered returning an option here, but matching the empty string is just as easy
 
-#define wrap_git_tree_entry(N,CONVERSION) \
+#define old_wrap_git_tree_entry(N,CONVERSION) \
 CAMLprim value ocaml_git_tree_entry_##N( value tree, value v ) { \
 	CAMLparam2(tree,v); \
 	git_tree_entry *te = git_tree_entry_##N ( *(git_tree **)Data_custom_val(tree), CONVERSION(v) ); \
 	CAMLreturn(git_tree_entry_to_ocaml_tree_entry(te)); \
 }
 
-wrap_git_tree_entry(byname,String_val);  // ocaml_git_tree_entry_byname
-wrap_git_tree_entry(byindex,Int_val);    // ocaml_git_tree_entry_byindex
+warp_retptr_ptr1_val1(git_tree_entry_byname,git_tree_entry,
+	"Git.tree.entry_byname",
+	git_tree,String_val);
+warp_retptr_ptr1_val1(git_tree_entry_byindex,git_tree_entry,
+	"Git.tree.entry_byindex",
+	git_tree,Int_val);
+
+warp_retunit_exn_ptr1_val1(git_tree_entry_byname,
+	"Git.tree.remove_entry_byname",
+	git_tree,String_val);
+warp_retunit_exn_ptr1_val1(git_tree_entry_byindex,
+	"Git.tree.remove_entry_byindex",
+	git_tree,Int_val);
+
+wrap_retunit_ptr(git_tree_clear_entries, git_tree);
 
 
 /* *** Commit operations *** */
@@ -347,7 +459,6 @@ CAMLprim value ocaml_git_blob_lookup( value repo, value id )
 	{ return _ocaml_git_object_lookup(repo,id,GIT_OBJ_BLOB); }
 
 #define wrap_retval_blob(NN,C)  wrap_retval_ptr1(NN,C,git_blob)
-
 wrap_retval_blob(git_blob_rawsize,Val_int);
 
 CAMLprim value ocaml_git_blob_rawcontent(value blob) {
