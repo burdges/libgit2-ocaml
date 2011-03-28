@@ -1,14 +1,10 @@
 
 Programming To Do :
 
-- Add index bindings.
-- Further homoginize the C stubs.
-- Tree entries should produces a blob directly, not just it's id.
-- Implement lazy lists for tree entries, commit parents, indexes, etc.
-- Is a union database object wise?  Any other stuff that should be more MLish?
-- Add bindings to creating and manipulating the varios data structures when
-  not managed by a repository.
-- Add write bindings for the objects managed in the repository, indices, etc.
+- Expand the test.ml to cover creating, modifying, and writing database
+  objects and the index.
+- Update the memory managment stuff for the development branch of libgit2.
+- Handle union database objects better.  Functors seems like overkill though.
 - Add revision walker bindings.
 - Figure out why libgit2 lacks merging.  :(
 
