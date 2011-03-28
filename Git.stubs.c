@@ -169,6 +169,7 @@ static struct custom_operations git_##N##_custom_ops = { \
 #define CAMLGC_used_git_tree		0
 #define CAMLGC_used_git_commit		0
 #define CAMLGC_used_git_blob		0
+#define CAMLGC_used_git_tag		0
 #define CAMLGC_used_git_reference	0
 #define CAMLGC_used_git_tree_entry	0
 
@@ -303,7 +304,7 @@ _ocaml_git_object_lookup( value repo, value id, git_otype otype ) {
 	int err = git_object_lookup( (git_object **)Data_custom_val(obj),
 			*(git_repository **)Data_custom_val(repo),
 			(git_oid *)String_val(id), otype);
-	pass_git_exceptions(err,"Git.Object.lookup",INVALID_EXN);
+	pass_git_exceptions(err,"Git.[object_type].lookup",INVALID_EXN);
 	CAMLreturn(obj);
 }
 
@@ -362,7 +363,7 @@ CAMLprim value ocaml_git_tree_lookup( value repo, value id )
    { return _ocaml_git_object_lookup(repo,id,GIT_OBJ_TREE); }
 
 wrap_setptr_ptr1(git_tree_new,git_tree,
-	"Git.Tree.new",INVALID_EXN,
+	"Git.Tree.create",INVALID_EXN,
  	git_repository);
 
 wrap_retval_ptr1(git_tree_entrycount,Val_int,  git_tree);
@@ -396,7 +397,7 @@ CAMLprim value ocaml_git_commit_lookup( value repo, value id )
    { return _ocaml_git_object_lookup(repo,id,GIT_OBJ_COMMIT); }
 
 wrap_setptr_ptr1(git_commit_new,git_commit,
-	"Git.Tree.new",INVALID_EXN,
+	"Git.Commit.create",INVALID_EXN,
  	git_repository);
 
 CAMLprim value ocaml_git_commit_time(value commit) {
@@ -419,11 +420,35 @@ wrap_setptr_ptr1(git_commit_tree,git_tree,
 	git_commit);
 // ocaml_git_commit_tree calls git_tree_lookup
 
+wrap_retval_commit(git_commit_parentcount, Int_val);
+wrap_setptr_ptr1_val1(git_commit_parent,git_commit,
+	"Git.Commit.parent",INVALID_EXN,
+	git_commit,Int_val);
+wrap_retunit_exn_ptr2(git_commit_add_parent,
+	"Git.Commit.add_parent",INVALID_EXN,
+	git_commit,git_commit);
 
-// CAMLprim value
-// ocaml_git_commit_parents(value commit) {
-//    CAMLparam1(commit);
-// }
+// wrap_retunit_ptr1_val1(git_commit_set_message_short,git_commit,
+//	String_val);
+wrap_retunit_ptr1_val1(git_commit_set_message,git_commit,
+	String_val);
+
+#define wrap_retunit_pc(FUNCTION,TYPE1,TYPE2,CONVERSION2) \
+CAMLprim value ocaml_##FUNCTION(value p1,value v2) { \
+        CAMLparam2(p1,v2); \
+	TYPE2 c2 = CONVERSION2(v2); \
+        FUNCTION( *(TYPE1 **)Data_custom_val(p1), &c2 ); \
+        CAMLreturn(Val_unit); \
+}
+
+wrap_retunit_pc(git_commit_set_committer,git_commit,
+	git_signature,ocaml_signture_to_git_signture_dirty);
+wrap_retunit_pc(git_commit_set_author,git_commit,
+	git_signature,ocaml_signture_to_git_signture_dirty);
+
+wrap_retunit_exn_ptr2(git_commit_set_tree,
+	"Git.Commit.set_tree",INVALID_EXN,
+	git_commit,git_tree);
 
 
 /* *** Blob operations *** */
@@ -432,6 +457,10 @@ wrap_setptr_ptr1(git_commit_tree,git_tree,
 
 CAMLprim value ocaml_git_blob_lookup( value repo, value id )
 	{ return _ocaml_git_object_lookup(repo,id,GIT_OBJ_BLOB); }
+
+wrap_setptr_ptr1(git_blob_new,git_blob,
+	"Git.Blob.create",INVALID_EXN,
+ 	git_repository);
 
 #define wrap_retval_blob(NN,C)  wrap_retval_ptr1(NN,C,git_blob)
 wrap_retval_blob(git_blob_rawsize,Val_int);
@@ -446,6 +475,30 @@ CAMLprim value ocaml_git_blob_rawcontent(value blob) {
 	CAMLreturn(c);
 }  // null blobs are returnned as empty blobs
 
+wrap_retunit_exn_ptr1_val1(git_blob_set_rawcontent_fromfile,
+	"Git.Blob.set_content_from_file",INVALID_EXN,
+	git_blob,String_val);
+
+CAMLprim value ocaml_git_blob_set_rawcontent(value blob,value b) {
+        CAMLparam2(blob,b);
+	int err = git_blob_set_rawcontent(
+			*(git_blob **)Data_custom_val(blob),
+			String_val(b), caml_string_length(b) );
+	pass_git_exceptions(err, "Git.Blob.set_content", INVALID_EXN );
+	CAMLreturn(Val_unit);
+}
+
+CAMLprim value ocaml_git_blob_writefile(value repo,value fn) {
+        CAMLparam2(repo,fn);
+	CAMLlocal1(id);
+	id = caml_alloc_string( GIT_OID_RAWSZ );
+	int err = git_blob_writefile( (git_oid *)String_val(id),
+			*(git_repository **)Data_custom_val(repo),
+			String_val(fn) );
+	pass_git_exceptions(err, "Git.Blob.writefile", INVALID_EXN );
+        CAMLreturn(id);
+}
+
 
 /* *** Tag operations *** */
 
@@ -454,6 +507,10 @@ CAMLprim value ocaml_git_blob_rawcontent(value blob) {
 CAMLprim value ocaml_git_tag_lookup( value repo, value id )
 	{ return _ocaml_git_object_lookup(repo,id,GIT_OBJ_TAG); }
 
+wrap_setptr_ptr1(git_tag_new,git_tag,
+	"Git.Blob.create",INVALID_EXN,
+ 	git_repository);
+
 #define wrap_retval_tag(NN,C)  wrap_retval_ptr1(NN,C,git_tag)
 wrap_retval_tag(git_tag_name,caml_copy_string);
 wrap_retval_tag(git_tag_type,Val_int);
@@ -461,10 +518,83 @@ wrap_retval_tag(git_tag_target_oid,caml_copy_git_oid);
 wrap_retval_tag(git_tag_message,caml_copy_string);
 wrap_retval_tag(git_tag_tagger,git_signture_to_ocaml_signture);
 
-wrap_setptr_ptr1(git_tag_target,git_object,
-	"Git.Tag.target",INVALID_EXN,
-	git_tag);
-// ocaml_git_tag_target calls git_object_lookup
+wrap_retunit_ptr1_val1(git_tag_set_name,
+	git_tag, String_val);
+wrap_retunit_pc(git_tag_set_tagger,git_tag,
+	git_signature,ocaml_signture_to_git_signture_dirty);
+wrap_retunit_ptr1_val1(git_tag_set_message,
+	git_tag, String_val);
+
+CAMLprim value
+ocaml_git_tag_set_target_oid(value t,value id) {
+	CAMLparam2(t,id);
+	git_tag *tag = (git_tag *)Data_custom_val(t);
+	git_repository *repo = git_object_owner( (git_object *)tag );
+	git_object *obj;
+	int err = git_object_lookup( &obj, repo, 
+			(git_oid *)String_val(id), GIT_OBJ_ANY);
+	pass_git_exceptions(err,"Git.Tag.set_target_id : git_object_lookup",INVALID_EXN);
+	err = git_tag_set_target(tag,obj);
+	pass_git_exceptions(err,"Git.Tag.set_target_id : git_tag_set_target",INVALID_EXN);
+	CAMLreturn(Val_unit);
+}
+
+
+/* *** Union object operations *** */
+
+CAMLprim value
+ocaml_git_database_object(git_object *obj) {
+	CAMLparam0();
+	CAMLlocal2(o,r);
+	o = caml_alloc_git_ptr(git_object);
+	*(git_object **)Data_custom_val(o) = obj;
+	r = caml_alloc(1, git_object_type(obj) );  // tag matches to type
+	Store_field(r,0, o);
+	CAMLreturn(r);
+}
+
+CAMLprim value
+ocaml_git_object_lookup( value repo, value id ) {
+	CAMLparam2(repo,id);
+	git_object *obj;
+	int err = git_object_lookup( &obj,
+			*(git_repository **)Data_custom_val(repo),
+			(git_oid *)String_val(id), GIT_OBJ_ANY);
+	pass_git_exceptions(err,"Git.object_lookup",INVALID_EXN);
+	CAMLreturn( ocaml_git_database_object(obj) );
+}
+
+CAMLprim value
+ocaml_git_tree_entry_2object( value entry ) {
+	CAMLparam1(entry);
+	git_object *obj;
+	int err = git_tree_entry_2object( &obj, *(git_tree_entry **)Data_custom_val(entry) );
+	pass_git_exceptions(err,"Git.tree_entry_2object",INVALID_EXN);
+	CAMLreturn( ocaml_git_database_object(obj) );
+}  // calls git_object_lookup
+
+CAMLprim value
+ocaml_git_tag_target( value tag ) {
+	CAMLparam1(tag);
+	git_object *obj;
+	int err = git_tag_target( &obj, *(git_tag **)Data_custom_val(tag) );
+	pass_git_exceptions(err,"Git.tag_target",INVALID_EXN);
+	CAMLreturn( ocaml_git_database_object(obj) );
+}  // calls git_object_lookup
+
+CAMLprim value
+ocaml_git_tag_set_target( value t, value dbo ) {
+	CAMLparam2(t,dbo);
+	if (Is_block(dbo)) {
+		git_object *obj = *(git_object **)Data_custom_val(Field(dbo,0));
+		if (git_object_type(obj) != Tag_val(dbo))
+			caml_invalid_argument("Git.Tag.set_target : Invalid object, incorrectly annotated object type.");
+		int err = git_tag_set_target( *(git_tag **)Data_custom_val(t), obj );
+		pass_git_exceptions(err,"Git.Tag.set_target",INVALID_EXN);
+	} else // (Is_long(v))
+		caml_invalid_argument("Git.Tag.set_target : Invalid object, not even a block.");
+	CAMLreturn(Val_unit);
+}
 
 
 /* *** Reference operations *** */
