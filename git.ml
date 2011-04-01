@@ -2,11 +2,9 @@
 
 (* *** Git SHA Object Ids *** *)
 
-(* 
- * We implement most libgit2 types like gid_oid as anonymous type strings
- * because ocaml strings are variable length arrays of unsigned characters. 
- * We ignoring oid shortening for now since no other objects need it.
- *)
+(* We implement gid_oid as anonymous type strings because ocaml strings	 *
+ * are variable length arrays of unsigned characters. We ignoring oid	 *
+ * shortening for now since no other objects need it. 			 *)
 
 module type OID = sig
   val hexsz : int
@@ -27,7 +25,6 @@ end ;;
 (* *** Indexes *** *)
 
 (* The index is the staging area between the repository and the database. *)
-
 
 module type INDEX = sig
   type t
@@ -78,14 +75,11 @@ end ;;
   (* Note that git_repository_index is identical to git_index_open_inrepo *)
 
 
-(* *** Object Databases and Repositories *** *)
+(* *** Object Databases  *** *)
 
-(* 
- * We shall maintain the distinction between the repository and the database
- * for forwards compatibility.  For now though, we suppress all lower level
- * commands aimed at custom backends, including databases not contained in a
- * repository and all git_rawobj methods.
- *)
+(* For now, we suppress all lower level database routines aimed at custom *
+ * backends, including databases not contained in a repository and all	  *
+ * git_rawobj methods.							  *)
 
 module type ODB = sig
   type t
@@ -97,6 +91,10 @@ module Odb : ODB = struct
   external exists : t -> Oid.t -> bool = "ocaml_git_odb_exists" 
 end ;;
 
+(* TODO : ODB streams methods? *)
+
+
+(* *** Repositories *** *)
 
 module type REPOSITORY = sig
   type t
@@ -123,42 +121,55 @@ module Repository : REPOSITORY = struct
 end ;;
 
 
+(* *** Database Object Types *** *)
 
-(* *** Abstract Database Objects *** *)
-
-(*
- * We'll require that all object lookup and creation methods explicitly
- * state the object type inside ocaml's type system.  There is actually a
- * GIT_OBJ_ANY = -2 option for git_object_lookup.
- *)
+type object_t
+type commit_t
+type tree_t
+type blob_t
+type tag_t
 
 (* You should not rearrange these type constructors because their values  *
  * match the libgit2 enum git_otype and the git file format specification *)
 
-type otype_enum = 	  OType_Ext1	| OType_Commit	| OType_Tree
-	| OType_Blob	| OType_Tag 	| OType_Ext2
-	| OType_OfsDelta	| OType_RefDelta	| OType_Invalid ;;
-let otype_from_int i = match i with 
-	  0 -> OType_Ext1 	| 1 -> OType_Commit
-	| 2 -> OType_Tree	| 3 -> OType_Blob
-	| 4 -> OType_Tag 	| 5 -> OType_Ext2
-	| 6 -> OType_OfsDelta	| 7 -> OType_RefDelta
-  	| _ -> OType_Invalid ;;
+type object_u = Invalid_object
+	| Ext1 of object_t
+	| Commit of commit_t
+	| Tree of tree_t
+	| Blob of blob_t
+	| Tag of tag_t
+	| Ext2 of object_t
+	| OfsDelta of object_t
+	| RefDelta of object_t ;;
 
-type timeo = { time:float; offset:int } ;;  (* ocaml prefers float for time *)
+type object_type = 	
+  	  Ext1_e	| Commit_e	| Tree_e
+	| Blob_e	| Tag_e 	| Ext2_e
+	| OfsDelta_e	| RefDelta_e	| Invalid_e ;;
+
+type timeo = { time:float; offset:int } ;; (* ocaml prefers float for time *)
 type signature = { name:string; email:string; time:timeo } ;;
 
+
+(* *** Unspecified Database Objects *** *)
+
+(* All the methods implemented for general objects must be reimplemented   *
+ * inside each object type's module because include would produce multiple *
+ * definitions of t and ocaml's class system seems excessive here.         *)
+
 module type OBJECT = sig
-  type t
+  type t = object_t
   val id : t -> Oid.t
-  val write : t -> unit
+  val owner : t -> Repository.t
+  val lookup : Oid.t -> object_u
 end ;;
- (* val otype : t -> int has inheritance issues *)
 
 module Object : OBJECT = struct
-  type t 
-  external id : t -> Oid.t = "ocaml_git_object_id" 
-  external write : t -> unit = "ocaml_git_object_write" 
+  type t = object_t
+  external id : t -> Oid.t		= "ocaml_git_object_id" 
+  external owner : t -> Repository.t	= "ocaml_git_object_owner" 
+  external lookup : Oid.t -> object_u
+	= "ocaml_git_object_lookup" ;;
 end ;;
 
 
@@ -171,48 +182,35 @@ module type TREEENTRY = sig
   val attributes : t -> int
   val name : t -> string
   val id : t -> Oid.t
-  val set_attributes : t -> int -> unit
-  val set_name : t -> string -> unit
-  val set_id : t -> Oid.t -> unit
+  val obj : Repository.t -> t -> object_u
 end ;;
 
 module TreeEntry : TREEENTRY = struct
   type t
-  external attributes : t -> int
-	= "ocaml_git_tree_entry_attributes"
-  external name : t -> string
-	= "ocaml_git_tree_entry_name"
-  external id : t -> Oid.t
-	= "ocaml_git_tree_entry_id"
-  external set_attributes : t -> int -> unit
-	= "ocaml_git_tree_entry_set_attributes"
-  external set_name : t -> string -> unit
-	= "ocaml_git_tree_entry_set_name"
-  external set_id : t -> Oid.t -> unit
-	= "ocaml_git_tree_entry_set_id"
+  external attributes : t -> int	= "ocaml_git_tree_entry_attributes"
+  external id : t -> Oid.t		= "ocaml_git_tree_entry_id"
+  external name : t -> string		= "ocaml_git_tree_entry_name"
+  external obj : Repository.t -> t -> object_u
+	= "ocaml_git_tree_entry_2object" ;;
 end ;;
 
 module type TREE = sig
-  include OBJECT
+  type t = tree_t
   val lookup : Repository.t -> Oid.t -> t
-  val create : Repository.t -> t
+  val id : t -> Oid.t
+  val owner : t -> Repository.t
   val entrycount : t -> int
   val entry_byindex : t -> int -> TreeEntry.t
   val entry_byname : t -> string -> TreeEntry.t
   val entries : t -> TreeEntry.t array
-  val add_entry : t -> Oid.t -> string -> int -> TreeEntry.t
-  val remove_entry_byindex : t -> int -> unit
-  val remove_entry_byname : t -> string -> unit
-  val clear_entries : t -> unit
 end ;;
 
 module Tree : TREE = struct
-  include Object
+  type t = tree_t
   external lookup : Repository.t -> Oid.t -> t
 	= "ocaml_git_tree_lookup"
-  external create : Repository.t -> t
-	= "ocaml_git_tree_new"
-
+  external id : t -> Oid.t		= "ocaml_git_object_id" 
+  external owner : t -> Repository.t	= "ocaml_git_object_owner" 
   external entrycount : t -> int
 	= "ocaml_git_tree_entrycount" 
   external entry_byindex : t -> int -> TreeEntry.t
@@ -220,27 +218,15 @@ module Tree : TREE = struct
   external entry_byname : t -> string -> TreeEntry.t
 	= "ocaml_git_tree_entry_byname" 
   let entries tree = Array.init (entrycount tree) (fun i -> entry_byindex tree i)
-
-  external add_entry : t -> Oid.t -> string -> int -> TreeEntry.t
-	= "ocaml_git_tree_add_entry"
-  external remove_entry_byindex : t -> int -> unit
-	= "ocaml_git_tree_remove_entry_byindex"
-  external remove_entry_byname : t -> string -> unit
-	= "ocaml_git_tree_remove_entry_byname" 
-
-  external clear_entries : t -> unit
-	= "ocaml_git_tree_clear_entries" 
 end ;;
-  (* git_tree_entry_2object appears after all object definitions *)
-
-(* The three functions git_tree_entry_set_id, git_tree_entry_set_name, and *
- * git_tree_entry_set_attributes suggest we must track tree entry pointers *)
 
 
 (* *** Commit Database Objects *** *)
 
 module type COMMIT = sig
-  include OBJECT
+  type t = commit_t
+  val id : t -> Oid.t
+  val owner : t -> Repository.t
   val lookup : Repository.t -> Oid.t -> t
   val time : t -> timeo
   val message_short : t -> string
@@ -251,19 +237,16 @@ module type COMMIT = sig
   val parentcount : t -> int
   val parent : t -> int -> t
   val parents : t -> t lazy_t array
-  val add_parent : t -> t -> unit
-  val set_message : t -> string -> unit
-  val set_committer : t -> signature -> unit
-  val set_author : t -> signature -> unit
-  val set_tree : t -> Tree.t -> unit
+  val create : Repository.t -> string -> signature -> signature -> string -> Oid.t -> Oid.t array -> Oid.t
+  val create_o : Repository.t -> string -> signature -> signature -> string -> Tree.t -> t array -> Oid.t
 end ;;
 
 module Commit : COMMIT = struct
-  include Object
+  type t = commit_t
+  external id : t -> Oid.t		= "ocaml_git_object_id" 
+  external owner : t -> Repository.t	= "ocaml_git_object_owner" 
   external lookup : Repository.t -> Oid.t -> t
        = "ocaml_git_commit_lookup" 
-  external create : Repository.t -> t
-	= "ocaml_git_commit_new"
   external time : t -> timeo		= "ocaml_git_commit_time" 
   external message_short : t -> string	= "ocaml_git_commit_message_short" 
   external message : t -> string	= "ocaml_git_commit_message" 
@@ -274,47 +257,39 @@ module Commit : COMMIT = struct
   external parentcount : t -> int	= "ocaml_git_commit_parentcount"
   external parent : t -> int -> t	= "ocaml_git_commit_parent"
   let parents c = Array.init (parentcount c) (fun i -> lazy (parent c i))
-  external add_parent : t -> t -> unit	= "ocaml_git_commit_add_parent"
 
-  (*  external set_message_short : t -> string -> unit	*)
-  (*		= "ocaml_git_commit_set_message_short" 	*)
-  external set_message : t -> string -> unit
-	= "ocaml_git_commit_set_message" 
-  external set_committer : t -> signature -> unit
-	= "ocaml_git_commit_set_committer" 
-  external set_author : t -> signature -> unit
-	= "ocaml_git_commit_set_author" 
-  external set_tree : t -> Tree.t -> unit
-	= "ocaml_git_commit_set_tree" 
+  external create : Repository.t -> string -> signature -> signature -> string -> Oid.t -> Oid.t array -> Oid.t
+	= "ocaml_git_commit_create_bytecode" "ocaml_git_commit_create"
+  external create_o : Repository.t -> string -> signature -> signature -> string -> Tree.t -> t array -> Oid.t
+	= "ocaml_git_commit_create_o_bytecode" "ocaml_git_commit_create_o"
 end ;;
 
 
 (* *** Blob Database Objects *** *)
 
 module type BLOB = sig
-  include OBJECT
+  type t = blob_t
+  val id : t -> Oid.t
+  val owner : t -> Repository.t
   val lookup : Repository.t -> Oid.t -> t
-  val create : Repository.t -> t
   val size : t -> int
   val content : t -> string
-  val set_content_from_file : t -> string -> unit
-  val set_content : t -> string -> int -> unit
+  val create_fromfile : Repository.t -> string -> Oid.t
+  val create_frombuffer : Repository.t -> string -> Oid.t
 end ;;
 
 module Blob : BLOB = struct
-  include Object
+  type t = blob_t
+  external id : t -> Oid.t		= "ocaml_git_object_id" 
+  external owner : t -> Repository.t	= "ocaml_git_object_owner" 
   external lookup : Repository.t -> Oid.t -> t
        = "ocaml_git_blob_lookup" 
-  external create : Repository.t -> t
-	= "ocaml_git_blob_new"
-  external size : t -> int             = "ocaml_git_blob_rawsize" 
-  external content : t -> string       = "ocaml_git_blob_rawcontent" 
-  external set_content_from_file : t -> string -> unit
-	= "ocaml_git_blob_set_rawcontent_fromfile"
-  external set_content : t -> string -> int -> unit
-	= "ocaml_git_blob_set_rawcontent"
-  external writefile : Repository.t -> string -> Oid.t
-	= "ocaml_git_blob_writefile"
+  external size : t -> int		= "ocaml_git_blob_rawsize" 
+  external content : t -> string	= "ocaml_git_blob_rawcontent" 
+  external create_fromfile : Repository.t -> string -> Oid.t
+	= "ocaml_git_blob_create_fromfile"
+  external create_frombuffer : Repository.t -> string -> Oid.t
+	= "git_blob_create_frombuffer"
 end ;;
 
 
@@ -323,66 +298,40 @@ end ;;
 (* Tags attach permanent names to database objects, ala "April fools release" *)
 
 module type TAG = sig
-  include OBJECT
+  type t = tag_t
+  val id : t -> Oid.t
+  val owner : t -> Repository.t
   val lookup : Repository.t -> Oid.t -> t
   val create : Repository.t -> t
   val name : t -> string
-  val target_type : t -> otype_enum
+  val target : t -> object_u
+  val target_type : t -> object_type
   val target_id : t -> Oid.t
   val tagger : t -> signature
   val message : t -> string
 
-  val set_name : t -> string -> unit
-  val set_tagger : t -> signature -> unit
-  val set_message : t -> string -> unit
-  val set_target_id : t -> Oid.t -> unit
+  val create : Repository.t -> string -> Oid.t -> object_type -> signature -> string -> Oid.t
+  val create_o : Repository.t -> string -> object_u -> signature -> string -> Oid.t
 end ;;
 
 module Tag : TAG = struct
-  include Object
+  type t = tag_t
+  external id : t -> Oid.t		= "ocaml_git_object_id" 
+  external owner : t -> Repository.t	= "ocaml_git_object_owner" 
   external lookup : Repository.t -> Oid.t -> t
        = "ocaml_git_tag_lookup" 
-  external create : Repository.t -> t
-	= "ocaml_git_tag_new"
   external name : t -> string		= "ocaml_git_tag_name" 
-  external _target_type : t -> int	= "ocaml_git_tag_type" 
-  let target_type tag = otype_from_int (_target_type tag) 
+  external target : t -> object_u	= "ocaml_git_tag_target"
+  external target_type : t -> object_type = "ocaml_git_tag_type" 
   external target_id : t -> Oid.t	= "ocaml_git_tag_target_oid" 
   external tagger : t -> signature	= "ocaml_git_tag_tagger" 
   external message : t -> string	= "ocaml_git_tag_message" 
 
-  external set_name : t -> string -> unit
-	= "ocaml_git_tag_set_name" 
-  external set_tagger : t -> signature -> unit
-	= "ocaml_git_tag_set_tagger" 
-  external set_message : t -> string -> unit
-	= "ocaml_git_tag_set_message" 
-  external set_target_id : t -> Oid.t -> unit
-	= "ocaml_git_tag_set_target_oid"
+  external create : Repository.t -> string -> Oid.t -> object_type -> signature -> string -> Oid.t
+	= "ocaml_git_tag_create_bytecode" "ocaml_git_tag_create" ;; 
+  external create_o : Repository.t -> string -> object_u -> signature -> string -> Oid.t
+	= "ocaml_git_tag_create_o" ;;
 end ;;
-
-
-(* *** Union Database Object *** *)
-
-(* Do NOT rearrange this list, their tag values must match git_otype *)
-type database_object = Invalid_object
-	| Ext1 of Object.t
-	| Commit of Commit.t
-	| Tree of Tree.t
-	| Blob of Blob.t
-	| Tag of Tag.t
-	| Ext2 of Object.t
-	| OfsDelta of Object.t
-	| RefDelta of Object.t ;;
-
-external object_lookup : Oid.t -> database_object
-	= "ocaml_git_object_lookup" ;;
-external tree_entry_2object : TreeEntry.t -> database_object
-	= "ocaml_git_tree_entry_2object" ;;
-external tag_target : Tag.t -> database_object
-	= "ocaml_git_tag_target" ;;
-external tag_set_target : Tag.t -> database_object -> unit
-	= "ocaml_git_tag_set_target" ;;
 
 
 (* *** References *** *)
@@ -399,7 +348,7 @@ module type REFERENCE = sig
   val name : t -> string
   val resolve : t -> t
   val referent : t -> referent_t
-  val resolution : t -> database_object
+  val resolution : t -> object_u
   val listall : Repository.t -> int -> string array
 end ;;
 
@@ -418,7 +367,7 @@ module Reference : REFERENCE = struct
 	(* See definition of git_rtype enum in git2/types.h *)
 
   let resolution r = match referent (resolve r) with
-	  Oid id -> object_lookup id
+	  Oid id -> Object.lookup id
 	| Symbolic _ -> Invalid_object
 	| Invalid_referent -> Invalid_object
   external listall : Repository.t -> int -> string array

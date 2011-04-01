@@ -1,20 +1,37 @@
 
+let msg = "Hello World" ;;
+
 let play_dir = "play" ;;
+let playthings = ["git.ml"; "stubs.c"; "Makefile"; "test.ml"; "TODO"; "wrappers.pl"] ;;
 
 print_string ("Initializing play directory : " ^ play_dir ^ "\n") ;;
 Unix.system ( String.concat " " ["rm -rf"; play_dir] ) ;;
 Unix.mkdir play_dir 0o700 ;;
 
 print_string "Testing Git.Repositort.init\n" ;;
-let r_init = Git.Repository.init play_dir ;;
-Git.Repository.free r_init ;;
+let r = Git.Repository.init play_dir ;;
 
 print_string "Initializing play repository.\n" ;;
-let playthings = ["Git.ml"; "Git.stubs.c"; "Makefile"; "test.ml"; "TODO"] ;;
 Unix.system ( String.concat " " ("cp" :: playthings @ [play_dir]) ) ;;
 Unix.chdir play_dir ;;
+
+(*
+libgit2 has a bug in it's handling of 
+
+print_string "Testing Git.Index.*\n" ;;
+let index = Git.Repository.index r ;;
+Git.Index.clear index ;;
+let b = Git.Blob.create r ;;
+Git.Blob.set_content_from_file b "git.ml" ;;
+let open Git.Index in 
+	List.iter (fun x -> add index x 0) playthings;
+	assert ( (List.length playthings) = (entrycount index) );
+	write index ;;
+*)
+
+(* Git.Repository.free r ;; *)
+
 Unix.system ( String.concat " " ("git add" :: playthings) ) ;;
-let msg = "Hello World" ;;
 Unix.system ("git commit -a -m '" ^ msg ^ "'") ;;
 
 
@@ -44,7 +61,7 @@ let (master_oid,c) = match Git.Reference.referent master with
 assert (master_oid = (Git.Commit.id c)) ;;
 
 let open Git.Commit in 
-	List.iter2 ( fun f x -> assert((f c) = x) ) 
+	List.iter2 ( fun f x -> assert ((f c) = x) ) 
 		[message; message_short ] 
 		[msg ^ "\n"; msg ] ;;
 print_string "Names : " ;;
@@ -56,7 +73,6 @@ print_string (String.concat "\t" (
 print_string " \n" ;;
 
 (*  let open Git.Commit in assert ( (author c) = (committer c) ) ;;  *)
-
 let t = Git.Commit.tree c ;;
 print_string "Testing Git.Tree.*\n" ;;
 assert ( (Git.Tree.entrycount t) = (List.length playthings) ) ;;
@@ -73,4 +89,3 @@ List.iter (
 		let {Unix.st_size=s} = Unix.stat fn in
 			assert ( s = (Git.Blob.size (Git.Blob.lookup r oid)) )
 	) ( List.map (Git.Tree.entry_byindex t) (range 0 ((Git.Tree.entrycount t) - 1)) )
-

@@ -1,32 +1,34 @@
+DEBUG =
+
 wrappers.h: wrappers.pl
 	perl wrappers.pl >wrappers.h
 
-Git.stubs.o: Git.stubs.c wrappers.h
-	ocamlc -c $<
+stubs.o: stubs.c wrappers.h
+	ocamlc $(DEBUG) -c $<
 
-dll_git2_stubs.so: Git.stubs.o
-	ocamlmklib  -o  _git2_stubs  $<
+dll_git2_stubs.so: stubs.o
+	ocamlmklib -o  _git2_stubs  $<
 
-Git.mli: Git.ml
+git.mli: git.ml
 	ocamlc -i $< > $@
 
-Git.cmi: Git.mli
-	ocamlc -c $<
+git.cmi: git.mli
+	ocamlc $(DEBUG) -c $<
 
-Git.cmo: Git.ml Git.cmi
-	ocamlc -c $<
+git.cmo: git.ml git.cmi
+	ocamlc $(DEBUG) -c $<
 
-Git.cma:  Git.cmo  dll_git2_stubs.so
-	ocamlc -a  -o $@  $<  -dllib -l_git2_stubs -custom -cclib -lgit2
+git.cma:  git.cmo  dll_git2_stubs.so
+	ocamlc $(DEBUG) -a  -o $@  $<  -dllib -l_git2_stubs -custom -cclib -lgit2
 
-Git.cmx: Git.ml Git.cmi
-	ocamlopt -c $<
+git.cmx: git.ml git.cmi
+	ocamlopt $(DEBUG) -c $<
 
-Git.cmxa:  Git.cmx  dll_git2_stubs.so
-	ocamlopt -a  -o $@  $<  -cclib -l_git2_stubs -cclib -lgit2
+git.cmxa:  git.cmx  dll_git2_stubs.so
+	ocamlopt $(DEBUG) -a  -o $@  $<  -cclib -l_git2_stubs -cclib -lgit2
 
-test: Git.stubs.o Git.cmx test.ml
-	ocamlopt unix.cmxa Git.stubs.o -cclib -lgit2 Git.cmx test.ml -o $@
+test: stubs.o git.cmx test.ml
+	ocamlopt $(DEBUG) unix.cmxa stubs.o -cclib -lgit2 git.cmx test.ml -o $@
 
 
 clean:
